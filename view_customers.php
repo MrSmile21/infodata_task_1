@@ -1,3 +1,74 @@
+<?php
+
+ob_start();
+session_start();
+include 'connect.php';
+
+if (!isset($_SESSION['user_id'])) {
+    header('Location: login.php');
+    exit;
+}
+
+// Handle Add
+if (isset($_GET['action']) && $_GET['action'] == 'add' && $_SERVER['REQUEST_METHOD'] == 'POST') {
+    $name = mysqli_real_escape_string($conn, $_POST['name']);
+    $email = mysqli_real_escape_string($conn, $_POST['email']);
+    $address = mysqli_real_escape_string($conn, $_POST['address']);
+    $mobile = mysqli_real_escape_string($conn, $_POST['mobile']);
+    $password = mysqli_real_escape_string($conn, $_POST['password']);
+
+    $photo = '';
+    if (isset($_FILES['photo']) && $_FILES['photo']['error'] == 0) {
+        $target_dir = "uploads/";
+        if (!file_exists($target_dir)) {
+            mkdir($target_dir, 0777, true);
+        }
+        $photo = $target_dir . basename($_FILES["photo"]["name"]);
+        move_uploaded_file($_FILES["photo"]["tmp_name"], $photo);
+    }
+
+    $sql = "INSERT INTO customers (name, email, address, mobile, photo, password) VALUES ('$name', '$email', '$address', '$mobile', '$photo', '$password')";
+    mysqli_query($conn, $sql);
+    header('Location: view_customers.php?search=' . urlencode(isset($_GET['search']) ? $_GET['search'] : '') . '&page=' . (isset($_GET['page']) ? $_GET['page'] : 1));
+    exit;
+}
+
+// Handele Delete
+if (isset($_GET['action']) && $_GET['action'] == 'delete' && isset($_GET['id'])) {
+    $id = intval($_GET['id']);
+    $sql = "DELETE FROM customers WHERE id = $id";
+    mysqli_query($conn, $sql);
+    header('Location: view_customers.php?search=' . urlencode(isset($_GET['search']) ? $_GET['search'] : '') . '&page=' . (isset($_GET['page']) ? $_GET['page'] : 1));
+    exit;
+}
+
+// Handle Edit
+if (isset($_GET['action']) && $_GET['action'] == 'edit' && $_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['id'])) {
+    $id = intval($_POST['id']);
+    $name = mysqli_real_escape_string($conn, $_POST['name']);
+    $email = mysqli_real_escape_string($conn, $_POST['email']);
+    $address = mysqli_real_escape_string($conn, $_POST['address']);
+    $mobile = mysqli_real_escape_string($conn, $_POST['mobile']);
+    $password = !empty($_POST['password']) ? mysqli_real_escape_string($conn, $_POST['password']) : null;
+
+    $photo_sql = '';
+    if (isset($_FILES['photo']) && $_FILES['photo']['error'] == 0) {
+        $target_dir = "uploads/";
+        if (!file_exists($target_dir)) {
+            mkdir($target_dir, 0777, true);
+        }
+        $photo = $target_dir . basename($_FILES["photo"]["name"]);
+        move_uploaded_file($_FILES["photo"]["tmp_name"], $photo);
+        $photo_sql = ", photo = '$photo'";
+    }
+
+    $password_sql = $password ? ", password = '$password'" : '';
+
+    $sql = "UPDATE customers SET name = '$name', email = '$email', address = '$address', mobile = '$mobile', $photo_sql $password_sql WHERE id = $id";
+}
+
+?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,6 +79,9 @@
         body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
         .container { max-width: 1000px; margin: 0 auto; padding: 20px; background: white; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
         h2, h3 { color: #333; }
+        .header-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .logout-btn { padding: 10px 20px; background: #dc3545; color: white; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .logout-btn:hover { background: #c82333; }
         .search-bar { margin-bottom: 20px; }
         .search-bar input { padding: 10px; width: 300px; border: 1px solid #ccc; border-radius: 4px; }
         .search-bar button, .export-btn { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px; }
@@ -28,7 +102,10 @@
 </head>
 <body>
     <div class="container">
-        <h2>Customer Details</h2>
+        <div class="header-actions">
+            <h2>Customer Details</h2>
+            <a href="logout_process.php" class="logout-btn">Logout</a>
+        </div>
 
         <!-- Search Bar -->
         <div class="search-bar">
@@ -69,14 +146,6 @@
             </thead>
             <tbody>
                 <?php
-                session_start();
-                include 'connect.php';
-
-                // Check if user is logged in
-                if (!isset($_SESSION['user_id'])) {
-                    header('Location: login.php');
-                    exit;
-                }
                 
                 // Pagination
                 $limit = 5; // Records per page
@@ -86,78 +155,6 @@
                 // Search
                 $search = isset($_GET['search']) ? mysqli_real_escape_string($conn, $_GET['search']) : '';
                 $where = $search ? "WHERE name LIKE '%$search%' OR email LIKE '%$search%'" : '';
-
-                //Handle Add
-                if (isset($_GET['action']) && $_GET['action'] == 'add' && $_SERVER['REQUEST_METHOD'] == 'POST') {
-                    $name = mysqli_real_escape_string($conn, $_POST['name']);
-                    $email = mysqli_real_escape_string($conn, $_POST['email']);
-                    $address = mysqli_real_escape_string($conn, $_POST['address']);
-                    $mobile = mysqli_real_escape_string($conn, $_POST['mobile']);
-                    $password = mysqli_real_escape_string($conn, $_POST['password']);
-
-                    //check if email already exists
-                    $check_email_sql = "SELECT email FROM customers WHERE email = '$email'";
-                    $check_result = mysqli_query($conn, $check_email_sql);
-
-                    if (mysqli_num_rows($check_result) > 0) {
-                        //Email already exists, handle error
-                        $_SESSION['error_message'] = "Error: The email '$email' is already registered.";
-                        header('Location: view_customers.php');
-                        exit;
-                    }
-
-                    $photo = '';
-                    if (isset($_FILES['photo']) && $_FILES['photo']['error'] == 0) {
-                        $target_dir = "uploads/";
-                        if (!file_exists($target_dir)) {
-                            mkdir($target_dir, 0777, true);
-                        }
-                        $photo = $target_dir . basename($_FILES["photo"]["name"]);
-                        move_uploaded_file($_FILES["photo"]["tmp_name"], $photo);
-                    }
-
-                    $sql = "INSERT INTO customers (name, email, address, mobile, photo, password) VALUES ('$name', '$email', '$address', '$mobile', '$photo', '$password')";
-
-                    mysqli_query($conn, $sql);
-                    header('Location: view_customers.php');
-                    exit;
-                } 
-
-                //Handle delete
-                if (isset($_GET['action']) && $_GET['action'] == 'delete' && isset($_GET['id'])) {
-                    $id = intval($_GET['id']);
-                    $sql = "DELETE FROM customers WHERE id = $id";
-                    mysqli_query($conn, $sql);
-                    header('Location: view_customers.php?search=' . urlencode($search) . '&page=' . $page);
-                    exit;
-                }
-
-                //Handle Edit (Form Submission)
-                if (isset($_GET['action']) && $_GET['action'] == 'edit' && $_SERVER['REQUEST_METHOD'] == 'POST' && isset($_POST['id'])) {
-                    $id = intval($_POST['id']);
-                    $name = mysqli_real_escape_string($conn, $_POST['name']);
-                    $email = mysqli_real_escape_string($conn, $_POST['email']);
-                    $address = mysqli_real_escape_string($conn, $_POST['address']);
-                    $mobile = mysqli_real_escape_string($conn, $_POST['mobile']);
-                    $password = !empty($_POST['password']) ? mysqli_real_escape_string($conn, $_POST['password']) : null;
-
-                    $photo_sql = '';
-                    if (isset($_FILES['photo']) && $_FILES['photo']['error'] == 0) {
-                        $target_dir = "uploads/";
-                        if (!file_exists($target_dir)) {
-                            mkdir($target_dir, 0777, true);
-                        }
-                        $photo = $target_dir . basename($_FILES["photo"]["name"]);
-                        move_uploaded_file($_FILES["photo"]["tmp_name"], $photo);
-                        $photo_sql = ", photo = '$photo'";
-                    }
-
-                    $password_sql = $password ? ", password = '$password'" : '';
-                    $sql = "UPDATE customers SET name = '$name', email = '$email', address = '$address', mobile = '$mobile' $photo_sql $password_sql WHERE id = $id ";
-                    mysqli_query($conn, $sql);
-                    header('Location: view_customers.php?search=' . urlencode($search) . '&page=' . $page);
-                    exit;
-                }
 
                 //Fetch Customers
                 $sql = "SELECT * FROM customers $where LIMIT $limit OFFSET $offset";
@@ -215,6 +212,7 @@
             </tbody>
           </table>
     </div>
+
     <script>
         function showEditForm(id, name, email, address, mobile) {
             document.getElementById('edit-form-' + id).style.display = 'table-row';
@@ -222,3 +220,6 @@
     </script>
 </body>
 </html>
+<?php
+ob_end_flush();
+?>
